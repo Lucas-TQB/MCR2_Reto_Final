@@ -1,0 +1,92 @@
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Float32
+import threading
+import time
+import numpy as np
+
+class MotorCommandPublisher(Node):
+    def __init__(self):  # Fixed __init__ syntax
+        super().__init__('motor_command_publisher')
+        self.publisher_ = self.create_publisher(Float32, 'cmd_pwm', 10)
+        self.subscription = self.create_subscription(Float32, 'motor_telemetry', self.telemetry_callback, 10)
+        
+        # Initial state
+        self.current_value = 0.0
+        self.mode = 'manual' # Modes: 'manual', 'sine', 'step'
+        self.start_time = time.time()
+
+        # Start background thread for keyboard input
+        self.input_thread = threading.Thread(target=self.get_user_input)
+        self.input_thread.daemon = True
+        self.input_thread.start()
+
+        # 20Hz timer (0.05s) for smoother sine waves
+        self.timer = self.create_timer(0.05, self.timer_callback)
+
+    def telemetry_callback(self, msg):
+        # Displays the target (setpoint) vs reality (actual)
+        target_rpm = self.current_value * 140.0
+        print(f"\r[MODE: {self.mode.upper()}] Target: {target_rpm:.1f} RPM | Actual: {msg.data:.1f} RPM    ", end="")
+
+    def get_user_input(self):
+        print("\n--- Commands: Enter RPM (-140 to 140), 'sine', 'step', or 'stop' ---")
+        while rclpy.ok():
+            user_in = input().lower().strip()
+            if user_in == 'sine':
+                self.mode = 'sine'
+                self.start_time = time.time()
+                print("\nSwitched to SINE wave mode.")
+            elif user_in == 'step':
+                self.mode = 'step'
+                self.start_time = time.time()
+                print("\nSwitched to STEP function mode.")
+            elif user_in == 'stop':
+                self.mode = 'manual'
+                self.current_value = 0.0
+                print("\nMotor Stopped.")
+            else:
+                try:
+                    val = float(user_in)
+                    if -140 <= val <= 140:
+                        self.mode = 'manual'
+                        self.current_value = val / 140.0
+                    else:
+                        print("\nValue out of range (-140 to 140)!")
+                except ValueError:
+                    print("\nInvalid input. Enter RPM, 'sine', or 'step'.")
+
+    def timer_callback(self):
+        msg = Float32()
+        elapsed = time.time() - self.start_time
+
+        if self.mode == 'sine':
+            # Sine wave: 0.2Hz frequency, oscillating between -0.6 and 0.6 amplitude
+            amplitude = 0.6
+            frequency = 0.2
+            self.current_value = amplitude * np.sin(2 * np.pi * frequency * elapsed)
+        
+        elif self.mode == 'step':
+            # Low for 5 seconds, High for the rest
+            self.current_value = 0.2 if elapsed < 5.0 else 0.8
+
+        # In 'manual' mode, self.current_value is set directly by get_user_input
+        msg.data = self.current_value
+        self.publisher_.publish(msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = MotorCommandPublisher()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+<<<<<<< HEAD
+    main()
+=======
+    main()
+>>>>>>> 172ceca (Save local progress before pulling)
